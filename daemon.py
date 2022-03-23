@@ -1,4 +1,5 @@
 from iroha import Iroha, IrohaGrpc
+import psycopg
 from utils import *
 
 
@@ -14,6 +15,11 @@ class Daemon:
         self.domain = FLAGS.account_id.split('@')[1]
         self.keypair = keypair
         self.account_id = FLAGS.account_id
+
+        logging.info('Connecting to PostgresSQL...')
+        self.db_conn = psycopg.connect("host='127.0.0.1' dbname='iroha_default' user='postgres' password='mysecretpassword'")
+        logging.info('Connected to PostgresSQL.')
+
 
 
     def send_transaction_and_print_status(self, transaction):
@@ -128,4 +134,11 @@ class Daemon:
         data = response.account_assets_response
         print(data)
 
-
+    
+    def show_all_tables(self):
+        with self.db_conn.cursor() as cur:
+            cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")
+            res = {'result':[]}
+            for row in cur.fetchall():
+                res['result'].append(row[0])
+            return res
