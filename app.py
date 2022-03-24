@@ -2,6 +2,7 @@
 
 import os
 import sys
+import json
 from absl import app as absl_app 
 from absl import flags
 import flask
@@ -18,16 +19,41 @@ flags.DEFINE_string("account_id", "admin@test", "Your account ID.")
 
 
 app = flask.Flask(__name__)
+app.config["DEBUG"] = True
 keys = Keypair('f101537e319568c765b2cc89698325604991dca57b9716b58016b253506cab70', '313a07e6384776ed95447710d15e59148473ccfc052a681317a72a69f2a49910')
 daemon = None
 
-@app.route("/api/v1/select", methods=['GET'])
+@app.route("/api/v1/get_all_table", methods=['GET'])
 def select():
     global daemon
     return jsonify(daemon.show_all_tables())
 
 
-@app.route("/api/v1/")
+@app.route("/api/v1/create_table", methods=['POST'])
+def create_table():
+    global daemon
+    data = request.get_json()
+    daemon.create_table(data['table_name'])
+    return jsonify(success=True)
+
+
+@app.route("/api/v1/insert", methods=['POST'])
+def insert():
+    global daemon
+    data = request.get_json()
+    j = data['data']
+
+    daemon.insert_data(Entry(**j))
+    return jsonify(success=True)
+
+
+@app.route("/api/v1/select", methods=['POST'])
+def select_data():
+    global daemon
+    data = request.get_json()
+    j = data['data']
+    return json.dumps(daemon.get_data(j['table_name']))
+
 
 def main(argv):
     """

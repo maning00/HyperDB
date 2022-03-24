@@ -1,5 +1,5 @@
 from absl import logging
-import binascii
+import binascii, hashlib
 from iroha import IrohaCrypto
 
 
@@ -29,3 +29,27 @@ class Keypair:
 
     def __str__(self):
         return '{} {}'.format(self.private_key, self.public_key)
+
+
+class Entry:
+    """
+    Store the database entry in a class
+    """
+    def __init__(self, name, timestamp, author, email, institution, environment, parameters, details, attachment, hash=None):
+        self.name = name
+        self.timestamp = timestamp
+        self.author = author
+        self.email = email
+        self.institution = institution
+        self.environment = environment
+        self.parameters = parameters
+        self.details = details
+        self.attachment = attachment
+        self.hash = hash
+
+    def cal_hash(self):
+        """
+        Return hash of data.
+        """
+        data = '{}{}{}{}{}{}{}{}'.format(self.name, self.timestamp, self.author, self.email, self.institution, self.environment, self.parameters, self.details, self.attachment)
+        return hashlib.sha3_256(data.encode('utf-8')).hexdigest()

@@ -1,5 +1,6 @@
 from iroha import Iroha, IrohaGrpc
 import psycopg
+from psycopg.rows import class_row
 from utils import *
 
 
@@ -15,10 +16,12 @@ class Daemon:
         self.domain = FLAGS.account_id.split('@')[1]
         self.keypair = keypair
         self.account_id = FLAGS.account_id
+        self.sequence = 1
 
         logging.info('Connecting to PostgresSQL...')
-        self.db_conn = psycopg.connect("host='127.0.0.1' dbname='iroha_default' user='postgres' password='mysecretpassword'")
+        self.db_conn = psycopg.connect("host='127.0.0.1' dbname='chaindb' user='postgres' password='mysecretpassword'")
         logging.info('Connected to PostgresSQL.')
+        print("account_id is {}".format(self.account_id))
 
 
 
@@ -142,3 +145,40 @@ class Daemon:
             for row in cur.fetchall():
                 res['result'].append(row[0])
             return res
+
+
+    def create_table(self, table_name):
+        with self.db_conn.cursor() as cur:
+            cur.execute("""
+            CREATE TABLE "{}" (id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL, timestamp INT NOT NULL,
+            author VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL, 
+            institution VARCHAR(255) NOT NULL, environment TEXT NOT NULL, 
+            parameters TEXT NOT NULL, details TEXT NOT NULL, attachment TEXT NOT NULL,
+            hash TEXT NOT NULL)
+            """.format(table_name))
+            self.db_conn.commit()
+
+
+    def insert_data(self, entry):
+        with self.db_conn.cursor() as cur:
+            cur.execute("""
+            INSERT INTO "{}" (id, name, timestamp, author, email, institution, environment, parameters, details, attachment, hash)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """.format(self.account_id), (self.sequence, entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment, entry.parameters, entry.details, entry.attachment, entry.cal_hash()))
+            self.db_conn.commit()
+            self.sequence+=1
+
+
+    def get_data(self, table_name):
+        """
+        Gets the data from the database.
+        """
+        with self.db_conn.cursor(row_factory=class_row(Entry)) as cur:
+            cur.execute('SELECT name, timestamp, author, email, institution, environment, parameters, details, attachment, hash FROM "{}"'.format(table_name))
+            res = {}
+            id = 1
+            for row in cur.fetchall():
+                res[id] = row.__dict__
+                id+=1
+        print("returned {}".format(res))
+        return res
