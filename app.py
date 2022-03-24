@@ -2,7 +2,6 @@
 
 import os
 import sys
-import json
 from absl import app as absl_app 
 from absl import flags
 import flask
@@ -43,8 +42,10 @@ def insert():
     data = request.get_json()
     j = data['data']
 
-    daemon.insert_data(Entry(**j))
-    return jsonify(success=True)
+    if daemon.insert_data(Entry(**j)) == True:
+        return "OK", 200
+    else:
+        return "", 500
 
 
 @app.route("/api/v1/select", methods=['POST'])

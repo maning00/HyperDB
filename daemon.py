@@ -1,5 +1,6 @@
 from iroha import Iroha, IrohaGrpc
 import psycopg
+import json, base64
 from psycopg.rows import class_row
 from utils import *
 
@@ -16,7 +17,8 @@ class Daemon:
         self.domain = FLAGS.account_id.split('@')[1]
         self.keypair = keypair
         self.account_id = FLAGS.account_id
-        self.sequence = 1
+        self.set_id = 1
+        self.get_id = 1
 
         logging.info('Connecting to PostgresSQL...')
         self.db_conn = psycopg.connect("host='127.0.0.1' dbname='chaindb' user='postgres' password='mysecretpassword'")
@@ -35,6 +37,10 @@ class Daemon:
         self.net.send_tx(transaction)
         for status in self.net.tx_status_stream(transaction):
             logging.info(status)
+            if (status[2] != 0):
+                logging.error('Transaction returned status %s', status[2])
+                return False
+        return True
 
 
     @trace
@@ -103,13 +109,14 @@ class Daemon:
         """
         Sets a key-value pair in the kvstore.
         """
+        logging.info('Setting kvstore key %s to value %s', key, value)
         if account_id is None:
             account_id = self.account_id
         tx = self.iroha.transaction([
             self.iroha.command('SetAccountDetail', account_id=account_id, key=key, value=value)
         ])
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        self.send_transaction_and_print_status(tx)
+        return self.send_transaction_and_print_status(tx)
 
     
     @trace
@@ -150,7 +157,7 @@ class Daemon:
     def create_table(self, table_name):
         with self.db_conn.cursor() as cur:
             cur.execute("""
-            CREATE TABLE "{}" (id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL, timestamp INT NOT NULL,
+            CREATE TABLE "{}" (id SERIAL NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, timestamp INT NOT NULL,
             author VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL, 
             institution VARCHAR(255) NOT NULL, environment TEXT NOT NULL, 
             parameters TEXT NOT NULL, details TEXT NOT NULL, attachment TEXT NOT NULL,
@@ -161,12 +168,22 @@ class Daemon:
 
     def insert_data(self, entry):
         with self.db_conn.cursor() as cur:
+            hash = entry.cal_hash()
             cur.execute("""
-            INSERT INTO "{}" (id, name, timestamp, author, email, institution, environment, parameters, details, attachment, hash)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """.format(self.account_id), (self.sequence, entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment, entry.parameters, entry.details, entry.attachment, entry.cal_hash()))
+            INSERT INTO "{}" (name, timestamp, author, email, institution, environment, parameters, details, attachment, hash)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """.format(self.account_id), (entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment, entry.parameters, entry.details, entry.attachment, hash))
+
+            log = {}
+            log['name'] = entry.name
+            log['timestamp'] = entry.timestamp
+            log['hash'] = hash
+            if self.set_kvstore('set_'+str(self.set_id), base64.b16encode(json.dumps(log).encode('utf8'))) == False:
+                logging.error('set_kvstore failed')
+                return False
+            self.set_id+=1
             self.db_conn.commit()
-            self.sequence+=1
+            return True
 
 
     def get_data(self, table_name):
@@ -174,11 +191,13 @@ class Daemon:
         Gets the data from the database.
         """
         with self.db_conn.cursor(row_factory=class_row(Entry)) as cur:
-            cur.execute('SELECT name, timestamp, author, email, institution, environment, parameters, details, attachment, hash FROM "{}"'.format(table_name))
-            res = {}
-            id = 1
+            op_str = 'SELECT name, timestamp, author, email, institution, environment, parameters, details, attachment, hash FROM "{}"'.format(table_name)
+            cur.execute(op_str)
+            
+            self.set_kvstore('get_'+str(self.get_id), op_str)
+            self.get_id+=1
+            res = []
             for row in cur.fetchall():
-                res[id] = row.__dict__
-                id+=1
+                res.append(row.__dict__)
         print("returned {}".format(res))
         return res
