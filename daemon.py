@@ -1,8 +1,9 @@
 from iroha import Iroha, IrohaGrpc
-import psycopg
+import psycopg, binascii
 import json, base64
 from psycopg.rows import class_row
 from utils import *
+from skiplist import SkipList
 
 
 class Daemon:
@@ -16,6 +17,7 @@ class Daemon:
             FLAGS.iroha_addr, FLAGS.iroha_port))
         self.domain = FLAGS.account_id.split('@')[1]
         self.keypair = keypair
+        self.skip_list = SkipList()
         self.account_id = FLAGS.account_id
         self.set_id = 1
         self.get_id = 1
@@ -23,8 +25,7 @@ class Daemon:
         logging.info('Connecting to PostgresSQL...')
         self.db_conn = psycopg.connect("host='127.0.0.1' dbname='chaindb' user='postgres' password='mysecretpassword'")
         logging.info('Connected to PostgresSQL.')
-        print("account_id is {}".format(self.account_id))
-
+        logging.info("Account ID is {}".format(self.account_id))
 
 
     def send_transaction_and_print_status(self, transaction):
@@ -56,12 +57,13 @@ class Daemon:
                           public_key=user_public_key)
         ])
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        self.send_transaction_and_print_status(tx)
-        return Keypair(user_private_key, user_public_key)
+        if self.send_transaction_and_print_status(tx):
+            return Keypair(user_private_key, user_public_key)
+        return None
 
 
     @trace
-    def create_asset(self, asset_name, precision):
+    def create_asset(self, asset_name, precision) -> bool:
         """
         Creates an asset.
         asset_name: name string
@@ -71,11 +73,11 @@ class Daemon:
             self.iroha.command('CreateAsset', asset_name=asset_name, domain_id=self.domain, precision=precision)
         ])
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        self.send_transaction_and_print_status(tx)
+        return self.send_transaction_and_print_status(tx)
 
     
     @trace
-    def add_asset(self, asset_id, amount):
+    def add_asset(self, asset_id, amount) -> bool:
         """
         Adds an asset to an account.
         asset_id: asset#domain
@@ -85,11 +87,11 @@ class Daemon:
             self.iroha.command('AddAssetQuantity', asset_id=asset_id, amount=str(amount))
         ])
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        self.send_transaction_and_print_status(tx)
+        return self.send_transaction_and_print_status(tx)
 
     
     @trace
-    def transfer_asset(self, asset_id, amount, dest_account_id):
+    def transfer_asset(self, asset_id, amount, dest_account_id) -> bool:
         """
         Transfers an asset from an account to another.
         asset_id: asset#domain
@@ -101,11 +103,11 @@ class Daemon:
                           asset_id=asset_id, amount=str(amount))
         ])
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        self.send_transaction_and_print_status(tx)
+        return self.send_transaction_and_print_status(tx)
 
 
     @trace
-    def set_kvstore(self, key, value, account_id = None):
+    def set_kvstore(self, key, value, account_id = None) -> bool:
         """
         Sets a key-value pair in the kvstore.
         """
@@ -172,15 +174,17 @@ class Daemon:
             cur.execute("""
             INSERT INTO "{}" (name, timestamp, author, email, institution, environment, parameters, details, attachment, hash)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """.format(self.account_id), (entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment, entry.parameters, entry.details, entry.attachment, hash))
+            """.format(self.account_id), (entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment, entry.parameters, entry.details, entry.attachment, hash.hexdigest()))
 
             log = {}
             log['name'] = entry.name
             log['timestamp'] = entry.timestamp
-            log['hash'] = hash
+            log['hash'] = hash.hexdigest()
             if self.set_kvstore('set_'+str(self.set_id), base64.b16encode(json.dumps(log).encode('utf8'))) == False:
                 logging.error('set_kvstore failed')
                 return False
+            self.skip_list.update(True, hash.digest())
+            logging.debug('inserting {}'.format(hash.digest()))
             self.set_id+=1
             self.db_conn.commit()
             return True
@@ -193,11 +197,43 @@ class Daemon:
         with self.db_conn.cursor(row_factory=class_row(Entry)) as cur:
             op_str = 'SELECT name, timestamp, author, email, institution, environment, parameters, details, attachment, hash FROM "{}"'.format(table_name)
             cur.execute(op_str)
-            
-            self.set_kvstore('get_'+str(self.get_id), op_str)
+            if table_name != self.account_id:
+                self.transfer_asset('coin#'+self.domain, 1, table_name)
+            self.set_kvstore('get_'+str(self.get_id), table_name)
             self.get_id+=1
             res = []
             for row in cur.fetchall():
                 res.append(row.__dict__)
-        print("returned {}".format(res))
+                logging.debug('verifying {}'.format(binascii.a2b_hex(row.hash)))
+                response = self.skip_list.verify(binascii.a2b_hex(row.hash))
+                print(response.validates_against())
         return res
+
+
+    def select_columns(self, table_name, column_names):
+        """
+        Selects columns from the database.
+        """
+        with self.db_conn.cursor() as cur:
+            op_str = 'SELECT '
+            for i in range(len(column_names)):
+                op_str += column_names[i]
+                if i != len(column_names)-1:
+                    op_str += ', '
+            op_str += ' FROM "{}"'.format(table_name)
+            cur.execute(op_str)
+            res = []
+            for row in cur.fetchall():
+                res.append(row)
+        return res
+
+
+    def delete_data(self, table_name, hash):
+        """
+        Deletes data from the database.
+        """
+        with self.db_conn.cursor() as cur:
+            cur.execute("DELETE FROM {} WHERE hash=%s".format(table_name), hash)
+            self.db_conn.commit()
+            self.set_kvstore('del_'+str(self.del_id), table_name)
+            return True

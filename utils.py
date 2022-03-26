@@ -1,5 +1,5 @@
 from absl import logging
-import binascii, hashlib
+import hashlib
 from iroha import IrohaCrypto
 
 
@@ -52,4 +52,4 @@ class Entry:
         Return hash of data.
         """
         data = '{}{}{}{}{}{}{}{}'.format(self.name, self.timestamp, self.author, self.email, self.institution, self.environment, self.parameters, self.details, self.attachment)
-        return hashlib.sha3_256(data.encode('utf-8')).hexdigest()
+        return hashlib.sha256(data.encode('utf-8'))
