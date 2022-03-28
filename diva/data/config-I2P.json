@@ -1,0 +1,23 @@
+{
+  "log": {
+    "level": "$LOG_LEVEL"
+  },
+  "block_store_path" : "/opt/iroha/blockstore/",
+  "torii_port" : 50051,
+  "internal_port" : 10001,
+  "database": {
+    "host": "$IP_POSTGRES",
+    "port": 5432,
+    "user": "iroha",
+    "password": "iroha",
+    "working database": "$IROHA_DATABASE",
+    "maintenance database": "postgres"
+  },
+  "max_proposal_size" : 10,
+  "proposal_delay" : 10000,
+  "vote_delay" : 20000,
+  "mst_enable" : false,
+  "mst_expiration_time" : 1440,
+  "max_rounds_delay": 3000,
+  "stale_stream_max_rounds": 2
+}

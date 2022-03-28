@@ -27,7 +27,7 @@ class Daemon:
         self.get_id = 1
 
         logging.info('Connecting to PostgresSQL...')
-        self.db_conn = psycopg.connect("host='127.0.0.1' dbname='chaindb' user='postgres' password='mysecretpassword'")
+        self.db_conn = psycopg.connect("host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
         logging.info('Connected to PostgresSQL.')
         logging.info("Account ID is {}".format(self.account_id))
 

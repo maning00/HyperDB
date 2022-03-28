@@ -10,14 +10,14 @@ from flask import request, jsonify
 from daemon import *
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("iroha_addr", "127.0.0.1", "iroha host address.")
+flags.DEFINE_string("iroha_addr", "172.29.101.125", "iroha host address.")
 flags.DEFINE_integer("iroha_port", 50051, "iroha host port.")
 flags.DEFINE_string("account_id", "admin@test", "Your account ID.")
 
 app = flask.Flask(__name__)
 app.config["DEBUG"] = True
-keys = Keypair('f101537e319568c765b2cc89698325604991dca57b9716b58016b253506cab70',
-               '313a07e6384776ed95447710d15e59148473ccfc052a681317a72a69f2a49910')
+keys = Keypair('1d3689834ffbe2ffb9ecab2df2534756127a526dea924b47364bf175fa9400f3',
+               '0991dc40273095cef7e87ec6507b39c0c9f18dd514c84bdf88d80be55ae66671')
 daemon = None
 
 
