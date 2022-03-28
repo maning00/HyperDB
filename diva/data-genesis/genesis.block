@@ -134,6 +134,44 @@
                              "accountId":"diva@testnet.ustb.edu",
                              "roleName":"subscriber"
                           }
+                       },
+                       {
+                          "createAccount":{
+                             "accountName":"maning",
+                             "domainId":"testnet.ustb.edu",
+                             "publicKey":"$N1"
+                          }
+                       },
+                       {
+                          "appendRole":{
+                             "accountId":"maning@testnet.ustb.edu",
+                             "roleName":"diva"
+                          }
+                       },
+                       {
+                          "detachRole":{
+                             "accountId":"maning@testnet.ustb.edu",
+                             "roleName":"subscriber"
+                          }
+                       },
+                       {
+                          "createAccount":{
+                             "accountName":"ncms",
+                             "domainId":"testnet.ustb.edu",
+                             "publicKey":"$N2"
+                          }
+                       },
+                       {
+                          "appendRole":{
+                             "accountId":"ncms@testnet.ustb.edu",
+                             "roleName":"diva"
+                          }
+                       },
+                       {
+                          "detachRole":{
+                             "accountId":"ncms@testnet.ustb.edu",
+                             "roleName":"subscriber"
+                          }
                        }
                     ],
                     "quorum":1
@@ -147,3 +185,4 @@
      }
    }
 }
+

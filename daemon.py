@@ -26,8 +26,25 @@ class Daemon:
         self.set_id = 1
         self.get_id = 1
 
+        # connect to the database
         logging.info('Connecting to PostgresSQL...')
-        self.db_conn = psycopg.connect("host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
+        try:
+            self.db_conn = psycopg.connect("host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
+        except:
+            logging.warning("Cannot find database, tring to create one...")
+            con = psycopg.connect("host='172.29.101.25' user='iroha' password='iroha'")
+            con._set_autocommit(True)
+            cursor = con.cursor()
+            cursor.execute("create database chaindb")
+            con.commit()
+
+            try:
+                self.db_conn = psycopg.connect("host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
+            except:
+                logging.error("Cannot connect to database")
+                exit(1)
+            self.create_table(self.account_id)
+
         logging.info('Connected to PostgresSQL.')
         logging.info("Account ID is {}".format(self.account_id))
 

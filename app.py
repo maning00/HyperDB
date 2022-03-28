@@ -12,7 +12,7 @@ from daemon import *
 FLAGS = flags.FLAGS
 flags.DEFINE_string("iroha_addr", "172.29.101.125", "iroha host address.")
 flags.DEFINE_integer("iroha_port", 50051, "iroha host port.")
-flags.DEFINE_string("account_id", "admin@test", "Your account ID.")
+flags.DEFINE_string("account_id", "diva@testnet.ustb.edu", "Your account ID.")
 
 app = flask.Flask(__name__)
 app.config["DEBUG"] = True
