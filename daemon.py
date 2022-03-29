@@ -1,5 +1,7 @@
 import base64
 import json
+import pickle
+import time
 
 import binascii
 import psycopg
@@ -24,7 +26,6 @@ class Daemon:
         self.skip_list = SkipList()
         self.account_id = FLAGS.account_id
         self.set_id = 1
-        self.get_id = 1
 
         # connect to the database
         logging.info('Connecting to PostgresSQL...')
@@ -46,7 +47,25 @@ class Daemon:
             self.create_table(self.account_id)
 
         logging.info('Connected to PostgresSQL.')
-        logging.info("Account ID is {}".format(self.account_id))
+        if self.account_id not in self.show_all_tables()['result']:
+            self.create_table(self.account_id)
+        # get most recent set_id from the database
+        with self.db_conn.cursor() as cur:
+            cur.execute('SELECT MAX(id) FROM "{}"'.format(self.account_id))
+            res = cur.fetchone()
+            if res[0] is not None:
+                self.set_id = res[0] + 1
+                logging.info("Getting latest data...")
+                val = self.get_kvstore('set_' + str(self.set_id))
+                while(val):
+                    entry = pickle.loads(base64.b16decode(val))
+                    self.insert_data(entry, False)
+                    self.set_id += 1
+                    val = self.get_kvstore('set_' + str(self.set_id))
+            
+            
+
+        logging.info("Account ID is {}\n Daemon is running...".format(self.account_id))
 
     def send_transaction_and_print_status(self, transaction):
         """
@@ -135,18 +154,23 @@ class Daemon:
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
         return self.send_transaction_and_print_status(tx)
 
-    @trace
+
     def get_kvstore(self, key, account_id=None):
         """
         Gets a key-value pair from the kvstore.
         """
         if account_id is None:
             account_id = self.account_id
-        query = self.iroha.query('GetAccountDetail', account_id=account_id)
+        query = self.iroha.query('GetAccountDetail', account_id=account_id, key=key)
         IrohaCrypto.sign_query(query, self.keypair.private_key)
         response = self.net.send_query(query)
-        data = response.account_detail_response
-        print(data)
+        data = json.loads(response.account_detail_response.detail)
+        if len(data) == 0:
+            logging.debug('Key %s not found', key)
+            return None
+        else:
+            logging.debug('Key %s has value %s', key, data[account_id][key])
+            return data[account_id][key]
 
     @trace
     def get_account_assets(self, account_id):
@@ -169,33 +193,31 @@ class Daemon:
             return res
 
     def create_table(self, table_name):
+        logging.debug('Creating table %s', table_name)
         with self.db_conn.cursor() as cur:
             cur.execute("""
-            CREATE TABLE "{}" (id SERIAL NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, timestamp INT NOT NULL,
+            CREATE TABLE "{}" (id INT NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, timestamp INT NOT NULL,
             author VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL, 
             institution VARCHAR(255) NOT NULL, environment TEXT NOT NULL, 
             parameters TEXT NOT NULL, details TEXT NOT NULL, attachment TEXT NOT NULL,
-            hash TEXT NOT NULL)
+            hash TEXT NOT NULL, index_offset INT NOT NULL, creator VARCHAR NOT NULL, reserved TEXT NULL)
             """.format(table_name))
             self.db_conn.commit()
 
-    def insert_data(self, entry):
+    def insert_data(self, entry, set_kvstore=True):
         with self.db_conn.cursor() as cur:
             hash = entry.cal_hash()
             cur.execute("""
-            INSERT INTO "{}" (name, timestamp, author, email, institution, environment, parameters, details, attachment, hash)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO "{}" VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
             """.format(self.account_id), (
-            entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment,
-            entry.parameters, entry.details, entry.attachment, hash.hexdigest()))
+            self.set_id, entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment,
+            entry.parameters, entry.details, entry.attachment, hash.hexdigest(), self.set_id, self.account_id))
 
-            log = {}
-            log['name'] = entry.name
-            log['timestamp'] = entry.timestamp
-            log['hash'] = hash.hexdigest()
-            if self.set_kvstore('set_' + str(self.set_id), base64.b16encode(json.dumps(log).encode('utf8'))) == False:
-                logging.error('set_kvstore failed')
-                return False
+            if set_kvstore:
+                if self.set_kvstore('set_' + str(self.set_id), base64.b16encode(pickle.dumps(entry))) == False:
+                    logging.error('set_kvstore failed')
+                    return False
+
             self.skip_list.update(True, hash.digest())
             logging.debug('inserting {}'.format(hash.digest()))
             self.set_id += 1
@@ -212,8 +234,6 @@ class Daemon:
             cur.execute(op_str)
             if table_name != self.account_id:
                 self.transfer_asset('coin#' + self.domain, 1, table_name)
-            self.set_kvstore('get_' + str(self.get_id), table_name)
-            self.get_id += 1
             res = []
             for row in cur.fetchall():
                 res.append(row.__dict__)
