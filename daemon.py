@@ -62,6 +62,12 @@ class Daemon:
                     self.insert_data(entry, False)
                     self.set_id += 1
                     val = self.get_kvstore('set_' + str(self.set_id))
+
+                for i in range(1,self.set_id):
+                    cur.execute('SELECT hash FROM "{}" WHERE id=%s'.format(self.account_id), (str(i),))
+                    res = cur.fetchone()
+                    if res is not None:
+                        self.skip_list.update(True, binascii.a2b_hex(res[0]))
             
             
 
@@ -236,10 +242,13 @@ class Daemon:
                 self.transfer_asset('coin#' + self.domain, 1, table_name)
             res = []
             for row in cur.fetchall():
-                res.append(row.__dict__)
-                logging.debug('verifying {}'.format(binascii.a2b_hex(row.hash)))
+                line = {}
+                line['data'] = row.__dict__
+                # res.append(row.__dict__)
+                logging.debug('verifying {}'.format(row.hash))
                 response = self.skip_list.verify(binascii.a2b_hex(row.hash))
-                print(response.validates_against())
+                line['authentication'] = response.__dict__
+                res.append(line)
         return res
 
     def select_columns(self, table_name, column_names):

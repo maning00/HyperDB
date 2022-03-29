@@ -2,17 +2,19 @@ from typing import List, Union, Tuple
 from random import random
 from hashlib import sha256
 from typing import Union
+import binascii
 
 
 def hash_fun(x: bytes, y: bytes) -> bytes:
-    return sha256(bytes(min(x, y) + max(x, y))).digest()
+    return sha256(bytes(binascii.a2b_hex(min(x.hex(), y.hex()) + max(x.hex(), y.hex())))).digest()
 
 
 class AuthenticResponse:
     def __init__(self, timestamp: bytes, item, proof, result: bool):
-        self.timestamp = timestamp
-        self.item = item
-        self.proof = proof
+        self.timestamp = timestamp.hex()
+        self.item = item.hex()
+        ls = [x.hex() for x in proof]
+        self.proof = ls
         self.result = result
 
     def subject_contained(self):
@@ -21,9 +23,9 @@ class AuthenticResponse:
     def validates_against(self, timestamp: Union[bytes, None] = None):
         if timestamp is None:
             timestamp = self.timestamp
-        acc = bytes(self.proof[0])
+        acc = binascii.a2b_hex(proof[0])
         for value in self.proof[1:]:
-            acc = hash_fun(acc, bytes(value))
+            acc = hash_fun(acc, binascii.a2b_hex(value))
         return timestamp == acc
 
 
