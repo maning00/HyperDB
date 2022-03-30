@@ -234,8 +234,8 @@ class Daemon:
         """
         Gets the data from the database.
         """
-        with self.db_conn.cursor(row_factory=class_row(Entry)) as cur:
-            op_str = 'SELECT name, timestamp, author, email, institution, environment, parameters, details, attachment, hash FROM "{}"'.format(
+        with self.db_conn.cursor() as cur:
+            op_str = 'SELECT * FROM "{}"'.format(
                 table_name)
             cur.execute(op_str)
             if table_name != self.account_id:
@@ -243,10 +243,11 @@ class Daemon:
             res = []
             for row in cur.fetchall():
                 line = {}
-                line['data'] = row.__dict__
+                en = Entry.from_tuple(row)
+                line['data'] = en.__dict__
                 # res.append(row.__dict__)
-                logging.debug('verifying {}'.format(row.hash))
-                response = self.skip_list.verify(binascii.a2b_hex(row.hash))
+                logging.debug('verifying {}'.format(en.hash))
+                response = self.skip_list.verify(binascii.a2b_hex(en.hash))
                 line['authentication'] = response.__dict__
                 res.append(line)
         return res

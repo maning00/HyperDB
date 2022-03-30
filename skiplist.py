@@ -23,7 +23,7 @@ class AuthenticResponse:
     def validates_against(self, timestamp: Union[bytes, None] = None):
         if timestamp is None:
             timestamp = self.timestamp
-        acc = binascii.a2b_hex(proof[0])
+        acc = binascii.a2b_hex(self.proof[0])
         for value in self.proof[1:]:
             acc = hash_fun(acc, binascii.a2b_hex(value))
         return timestamp == acc

@@ -35,7 +35,8 @@ class Entry:
     """
     Store the database entry in a class
     """
-    def __init__(self, name, timestamp, author, email, institution, environment, parameters, details, attachment, hash=None):
+    def __init__(self, id, name, timestamp, author, email, institution, environment, parameters, details, attachment, hash=None):
+        self.id = id
         self.name = name
         self.timestamp = timestamp
         self.author = author
@@ -51,5 +52,13 @@ class Entry:
         """
         Return hash of data.
         """
-        data = '{}{}{}{}{}{}{}{}'.format(self.name, self.timestamp, self.author, self.email, self.institution, self.environment, self.parameters, self.details, self.attachment)
+        data = '{}{}{}{}{}{}{}{}{}'.format(self.name, self.timestamp, self.author, self.email, self.institution, self.environment, self.parameters, self.details, self.attachment)
+
         return hashlib.sha256(data.encode('utf-8'))
+
+    @classmethod
+    def from_tuple(cls, tuple):
+        """
+        Create an entry from query results.
+        """
+        return cls(tuple[0], tuple[1], tuple[2], tuple[3], tuple[4], tuple[5], tuple[6], tuple[7], tuple[8], tuple[9], tuple[10])
