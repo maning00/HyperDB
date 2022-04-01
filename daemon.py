@@ -26,21 +26,25 @@ class Daemon:
         self.skip_list = SkipList()
         self.account_id = FLAGS.account_id
         self.set_id = 1
+        self.offsets = []
 
         # connect to the database
         logging.info('Connecting to PostgresSQL...')
         try:
-            self.db_conn = psycopg.connect("host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
+            self.db_conn = psycopg.connect(
+                "host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
         except:
             logging.warning("Cannot find database, tring to create one...")
-            con = psycopg.connect("host='172.29.101.25' user='iroha' password='iroha'")
+            con = psycopg.connect(
+                "host='172.29.101.25' user='iroha' password='iroha'")
             con._set_autocommit(True)
             cursor = con.cursor()
             cursor.execute("create database chaindb")
             con.commit()
 
             try:
-                self.db_conn = psycopg.connect("host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
+                self.db_conn = psycopg.connect(
+                    "host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
             except:
                 logging.error("Cannot connect to database")
                 exit(1)
@@ -49,6 +53,13 @@ class Daemon:
         logging.info('Connected to PostgresSQL.')
         if self.account_id not in self.show_all_tables()['result']:
             self.create_table(self.account_id)
+
+        self.syn_db_data()
+
+        logging.info(
+            "Account ID is {}\n Daemon is running...".format(self.account_id))
+
+    def syn_db_data(self):
         # get most recent set_id from the database
         with self.db_conn.cursor() as cur:
             cur.execute('SELECT MAX(id) FROM "{}"'.format(self.account_id))
@@ -63,15 +74,12 @@ class Daemon:
                     self.set_id += 1
                     val = self.get_kvstore('set_' + str(self.set_id))
 
-                for i in range(1,self.set_id):
-                    cur.execute('SELECT hash FROM "{}" WHERE id=%s'.format(self.account_id), (str(i),))
+                for i in range(1, self.set_id):
+                    cur.execute('SELECT hash FROM "{}" WHERE id=%s'.format(
+                        self.account_id), (str(i),))
                     res = cur.fetchone()
                     if res is not None:
                         self.skip_list.update(True, binascii.a2b_hex(res[0]))
-            
-            
-
-        logging.info("Account ID is {}\n Daemon is running...".format(self.account_id))
 
     def send_transaction_and_print_status(self, transaction):
         """
@@ -113,7 +121,8 @@ class Daemon:
         precision: number of decimal places
         """
         tx = self.iroha.transaction([
-            self.iroha.command('CreateAsset', asset_name=asset_name, domain_id=self.domain, precision=precision)
+            self.iroha.command('CreateAsset', asset_name=asset_name,
+                               domain_id=self.domain, precision=precision)
         ])
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
         return self.send_transaction_and_print_status(tx)
@@ -126,7 +135,8 @@ class Daemon:
         amount: number of assets
         """
         tx = self.iroha.transaction([
-            self.iroha.command('AddAssetQuantity', asset_id=asset_id, amount=str(amount))
+            self.iroha.command('AddAssetQuantity',
+                               asset_id=asset_id, amount=str(amount))
         ])
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
         return self.send_transaction_and_print_status(tx)
@@ -155,11 +165,11 @@ class Daemon:
         if account_id is None:
             account_id = self.account_id
         tx = self.iroha.transaction([
-            self.iroha.command('SetAccountDetail', account_id=account_id, key=key, value=value)
+            self.iroha.command('SetAccountDetail',
+                               account_id=account_id, key=key, value=value)
         ])
         IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
         return self.send_transaction_and_print_status(tx)
-
 
     def get_kvstore(self, key, account_id=None):
         """
@@ -167,7 +177,8 @@ class Daemon:
         """
         if account_id is None:
             account_id = self.account_id
-        query = self.iroha.query('GetAccountDetail', account_id=account_id, key=key)
+        query = self.iroha.query(
+            'GetAccountDetail', account_id=account_id, key=key)
         IrohaCrypto.sign_query(query, self.keypair.private_key)
         response = self.net.send_query(query)
         data = json.loads(response.account_detail_response.detail)
@@ -213,11 +224,19 @@ class Daemon:
     def insert_data(self, entry, set_kvstore=True):
         with self.db_conn.cursor() as cur:
             hash = entry.cal_hash()
+            offset = entry.offset
+            # if offset is set, it means that it is a edit request
+            if entry.offset == -1:
+                offset = self.set_id - 1
+
+            if offset >= len(self.offsets):
+                self.offsets.append(offset)
+            self.offsets[offset] = self.set_id
             cur.execute("""
             INSERT INTO "{}" VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
             """.format(self.account_id), (
-            self.set_id, entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment,
-            entry.parameters, entry.details, entry.attachment, hash.hexdigest(), self.set_id, self.account_id))
+                self.set_id, entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment,
+                entry.parameters, entry.details, entry.attachment, hash.hexdigest(), offset, self.account_id))
 
             if set_kvstore:
                 if self.set_kvstore('set_' + str(self.set_id), base64.b16encode(pickle.dumps(entry))) == False:
@@ -244,12 +263,13 @@ class Daemon:
             for row in cur.fetchall():
                 line = {}
                 en = Entry.from_tuple(row)
-                line['data'] = en.__dict__
-                # res.append(row.__dict__)
-                logging.debug('verifying {}'.format(en.hash))
-                response = self.skip_list.verify(binascii.a2b_hex(en.hash))
-                line['authentication'] = response.__dict__
-                res.append(line)
+                if (en.id == self.offsets[en.offset]): # always return the latest version of the entry
+                    line['data'] = en.__dict__
+                    # res.append(row.__dict__)
+                    logging.debug('verifying {}'.format(en.hash))
+                    response = self.skip_list.verify(binascii.a2b_hex(en.hash))
+                    line['authentication'] = response.__dict__
+                    res.append(line)
         return res
 
     def select_columns(self, table_name, column_names):
@@ -274,7 +294,8 @@ class Daemon:
         Deletes data from the database.
         """
         with self.db_conn.cursor() as cur:
-            cur.execute("DELETE FROM {} WHERE hash=%s".format(table_name), hash)
+            cur.execute(
+                "DELETE FROM {} WHERE hash=%s".format(table_name), hash)
             self.db_conn.commit()
             self.set_kvstore('del_' + str(self.del_id), table_name)
             return True
