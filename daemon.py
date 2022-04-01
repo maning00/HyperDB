@@ -80,6 +80,13 @@ class Daemon:
                     res = cur.fetchone()
                     if res is not None:
                         self.skip_list.update(True, binascii.a2b_hex(res[0]))
+        i = 0
+        id_val = self.get_kvstore('offset_' + str(i))
+        while(id_val != None):
+            self.offsets.append(int(id_val))
+            i += 1
+            id_val = self.get_kvstore('offset_' + str(i))
+
 
     def send_transaction_and_print_status(self, transaction):
         """
@@ -232,6 +239,7 @@ class Daemon:
             if offset >= len(self.offsets):
                 self.offsets.append(offset)
             self.offsets[offset] = self.set_id
+
             cur.execute("""
             INSERT INTO "{}" VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
             """.format(self.account_id), (
@@ -240,6 +248,10 @@ class Daemon:
 
             if set_kvstore:
                 if self.set_kvstore('set_' + str(self.set_id), base64.b16encode(pickle.dumps(entry))) == False:
+                    logging.error('set_kvstore failed')
+                    return False
+
+                if self.set_kvstore('offset_' + str(offset), str(self.set_id)) == False:
                     logging.error('set_kvstore failed')
                     return False
 
