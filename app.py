@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import os
-import sys
+import sys, time
 from absl import app as absl_app
 from absl import flags
 import flask
@@ -48,7 +48,8 @@ def insert():
     global daemon
     data = request.get_json()
     j = data['data']
-
+    while daemon.is_syncing():
+        time.sleep(1)
     if daemon.insert_data(Entry(**j)) == True:
         return "OK", 201
     else:

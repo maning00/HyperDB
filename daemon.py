@@ -1,9 +1,10 @@
 import base64
 import json
 import pickle
-import time
+import threading
 
 import binascii
+from turtle import distance
 import psycopg
 from iroha import Iroha, IrohaGrpc
 from psycopg.rows import class_row
@@ -27,6 +28,7 @@ class Daemon:
         self.account_id = FLAGS.account_id
         self.set_id = 1
         self.offsets = []
+        self.is_syncing = False
 
         # connect to the database
         logging.info('Connecting to PostgresSQL...')
@@ -55,12 +57,16 @@ class Daemon:
             self.create_table(self.account_id)
 
         self.syn_db_data()
-
+        self.check_duplication()
         logging.info(
             "Account ID is {}\n Daemon is running...".format(self.account_id))
+        
+    def is_syncing(self):
+        return self.is_syncing
 
     def syn_db_data(self):
         # get most recent set_id from the database
+        self.is_syncing = True
         with self.db_conn.cursor() as cur:
             cur.execute('SELECT MAX(id) FROM "{}"'.format(self.account_id))
             res = cur.fetchone()
@@ -86,6 +92,9 @@ class Daemon:
             self.offsets.append(int(id_val))
             i += 1
             id_val = self.get_kvstore('offset_' + str(i))
+        
+        threading.Timer(60, self.syn_db_data).start()
+        self.is_syncing = False
 
 
     def send_transaction_and_print_status(self, transaction):
@@ -283,6 +292,25 @@ class Daemon:
                     line['authentication'] = response.__dict__
                     res.append(line)
         return res
+
+    def check_duplication(self):
+        with self.db_conn.cursor() as cur:
+            op_str = 'SELECT * FROM "{}"'.format(
+                self.account_id)
+            cur.execute(op_str)
+            res = []
+            for row in cur.fetchall():
+                en = Entry.from_tuple(row)
+                if (en.id == self.offsets[en.offset]):
+                    en.simhash = en.cal_simhash()
+                    res.append(en)
+            
+            for i in range(len(res)):
+                for j in range(i+1, len(res)):
+                    distance = res[i].simhash.distance(res[j].simhash)
+                    if distance > 8:
+                        logging.debug('Duplicate entry found({}): {} and {}'.format(distance, res[i].name, res[j].name))
+        threading.Timer(600, self.check_duplication).start()
 
     def select_columns(self, table_name, column_names):
         """

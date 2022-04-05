@@ -1,6 +1,8 @@
 from absl import logging
 import hashlib
 from iroha import IrohaCrypto
+from simhash import Simhash
+import jieba
 
 
 def trace(func):
@@ -48,6 +50,7 @@ class Entry:
         self.attachment = attachment
         self.hash = hash
         self.offset = offset
+        self.simhash = None
 
     def cal_hash(self):
         """
@@ -56,6 +59,11 @@ class Entry:
         data = '{}{}{}{}{}{}{}{}{}'.format(self.name, self.timestamp, self.author, self.email, self.institution, self.environment, self.parameters, self.details, self.attachment)
 
         return hashlib.sha256(data.encode('utf-8'))
+
+    def cal_simhash(self):
+        data = '{};{};{};{};{};{};{};{};{}'.format(self.name, self.timestamp, self.author, self.email, self.institution, self.environment, self.parameters, self.details, self.attachment)
+        words = jieba.lcut(data)
+        return Simhash(words)
 
     @classmethod
     def from_tuple(cls, tuple):
