@@ -184,3 +184,4 @@ typings/
 # Backup
 /backup
 /uploads
+.venv/
