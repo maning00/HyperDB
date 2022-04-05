@@ -1,6 +1,7 @@
 import base64
 import json
 import pickle
+import sys
 import time
 
 import binascii
@@ -47,7 +48,7 @@ class Daemon:
                     "host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
             except:
                 logging.error("Cannot connect to database")
-                exit(1)
+                sys.exit(1)
             self.create_table(self.account_id)
 
         logging.info('Connected to PostgresSQL.')
