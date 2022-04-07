@@ -31,13 +31,11 @@ def allowed_file(filename):
 
 @app.route("/api/v1/get_all_table", methods=['GET'])
 def select():
-    global daemon
     return jsonify(daemon.show_all_tables())
 
 
 @app.route("/api/v1/create_table", methods=['POST'])
 def create_table():
-    global daemon
     data = request.get_json()
     daemon.create_table(data['table_name'])
     return "Created", 201
@@ -45,7 +43,6 @@ def create_table():
 
 @app.route("/api/v1/insert", methods=['POST'])
 def insert():
-    global daemon
     data = request.get_json()
     j = data['data']
     while daemon.is_syncing:
@@ -58,7 +55,6 @@ def insert():
 
 @app.route("/api/v1/get_data", methods=['POST'])
 def select_data():
-    global daemon
     data = request.get_json()
     table = data['table_name']
     return json.dumps(daemon.get_data(table))
@@ -66,7 +62,6 @@ def select_data():
 
 @app.route("/api/v1/select_columns", methods=['POST'])
 def select_columns():
-    global daemon
     data = request.get_json()
     table = data['table_name']
     columns = data['columns']
