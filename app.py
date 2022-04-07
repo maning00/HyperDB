@@ -48,7 +48,7 @@ def insert():
     global daemon
     data = request.get_json()
     j = data['data']
-    while daemon.is_syncing():
+    while daemon.is_syncing:
         time.sleep(1)
     if daemon.insert_data(Entry(**j)) == True:
         return "OK", 201

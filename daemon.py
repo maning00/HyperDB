@@ -62,8 +62,6 @@ class Daemon:
         logging.info(
             "Account ID is {}\n Daemon is running...".format(self.account_id))
         
-    def is_syncing(self):
-        return self.is_syncing
 
     def syn_db_data(self):
         # get most recent set_id from the database
