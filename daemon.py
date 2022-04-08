@@ -3,6 +3,7 @@ import json
 import pickle
 import sys
 import threading
+import time
 
 import binascii
 from turtle import distance
@@ -237,6 +238,7 @@ class Daemon:
             self.db_conn.commit()
 
     def insert_data(self, entry, set_kvstore=True):
+        while(self.is_syncing): time.sleep(1)
         with self.db_conn.cursor() as cur:
             hash = entry.cal_hash()
             offset = entry.offset

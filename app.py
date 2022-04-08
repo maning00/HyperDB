@@ -19,7 +19,10 @@ flags.DEFINE_string("account_id", "diva@testnet.ustb.edu", "Your account ID.")
 
 app = flask.Flask(__name__)
 app.config["DEBUG"] = True
-app.config['UPLOAD_FOLDER'] = os.path.abspath(os.getcwd()) + "/uploads"
+upload_path = os.path.abspath(os.getcwd()) + "/uploads"
+if not os.path.exists(upload_path):
+    os.mkdir(upload_path)
+app.config['UPLOAD_FOLDER'] = upload_path
 keys = Keypair('09aae8084401f5eff033ea894fc8b2b9a2abce571261e87efcbc6398d8f36166',
                '4bd49ab25faeaad1cca9dd2fe0c0b965223c932bd1273b5911dd28033266b965')
 daemon = None
