@@ -8,14 +8,20 @@ import flask
 from flask import request, jsonify
 from werkzeug.utils import secure_filename
 import ipfshttpclient
+from nextcloud import NextCloud
+from nextcloud.codes import ShareType
 
 from daemon import *
 
-client = ipfshttpclient.connect()
+ipfs_client = ipfshttpclient.connect()
 FLAGS = flags.FLAGS
 flags.DEFINE_string("iroha_addr", "172.29.101.125", "iroha host address.")
 flags.DEFINE_integer("iroha_port", 50051, "iroha host port.")
 flags.DEFINE_string("account_id", "diva@testnet.ustb.edu", "Your account ID.")
+
+NEXTCLOUD_URL = "http://10.25.127.19:8080"
+NEXTCLOUD_USERNAME = "admin"
+NEXTCLOUD_PASSWORD = "kizZyj-dykhow-8sixcu"
 
 app = flask.Flask(__name__)
 app.config["DEBUG"] = True
@@ -76,8 +82,8 @@ def login():
     return json.dumps({"result": "OK"})
 
 
-@app.route("/api/v1/upload", methods=['POST'])  # save upload file
-def upload():
+@app.route("/api/v1/upload_ipfs", methods=['POST'])  # save upload file
+def upload_ipfs():
     if 'file' not in request.files:
         resp = jsonify({'message' : 'No file part in the request'})
         resp.status_code = 400
@@ -91,9 +97,43 @@ def upload():
         filename = secure_filename(file.filename)
         path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(path)
-        resp = jsonify({'hash' : client.add(path)['Hash']})
+        resp = jsonify({'hash' : ipfs_client.add(path)['Hash']})
         resp.status_code = 201
         return resp
+    else:
+        resp = jsonify({'message' : 'Allowed file types are txt, pdf, png, jpg, jpeg, gif'})
+        resp.status_code = 400
+        return resp
+
+@app.route("/api/v1/upload_cloud", methods=['POST'])  # save upload file
+def upload_cloud():
+    if 'file' not in request.files:
+        resp = jsonify({'message' : 'No file part in the request'})
+        resp.status_code = 400
+        return resp
+    file = request.files['file']
+    if file.filename == '':
+        resp = jsonify({'message' : 'No file selected for uploading'})
+        resp.status_code = 400
+        return resp
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(path)
+        with NextCloud(
+        NEXTCLOUD_URL,
+        user=NEXTCLOUD_USERNAME,
+        password=NEXTCLOUD_PASSWORD,
+        session_kwargs={
+            'verify': False  # to disable ssl
+            }) as nxc:
+
+            nxc.upload_file(path, 'hyperdb/' + filename)
+            res = nxc.create_share('hyperdb/' + filename, share_type=ShareType.PUBLIC_LINK)
+            print(res.data)
+            resp = jsonify({'link' : res.data['url']})
+            resp.status_code = 201
+            return resp
     else:
         resp = jsonify({'message' : 'Allowed file types are txt, pdf, png, jpg, jpeg, gif'})
         resp.status_code = 400

@@ -4,7 +4,7 @@ import pickle
 import sys
 import threading
 import time
-
+from queue import Queue
 import binascii
 from turtle import distance
 import psycopg
@@ -31,6 +31,7 @@ class Daemon:
         self.set_id = 1
         self.offsets = []
         self.is_syncing = False
+        self.transactions = Queue()
 
         # connect to the database
         logging.info('Connecting to PostgresSQL...')
@@ -59,10 +60,34 @@ class Daemon:
             self.create_table(self.account_id)
 
         self.syn_db_data()
+        threading.Timer(5, self.send_transactions).start()
         self.check_duplication()
         logging.info(
             "Account ID is {}\n Daemon is running...".format(self.account_id))
         
+
+    def send_transactions(self):
+        """
+        Sends transactions from the queue to the Iroha network.
+        """
+        logging.info("Sending transactions...")
+        txs = []
+        while not self.transactions.empty():
+            transaction = self.transactions.get()
+            tx = self.iroha.transaction([transaction])
+            IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
+            txs.append(tx)
+        
+        if len(txs) != 0:
+            self.net.send_txs(txs)
+            logging.info("Transactions sent.")
+            for tx in txs:
+                for status in self.net.tx_status_stream(tx, 30):
+                    logging.info(status)
+                    if (status[2] != 0):
+                        logging.error('Transaction returned status %s', status[2])
+        threading.Timer(5, self.send_transactions).start()
+
 
     def syn_db_data(self):
         # get most recent set_id from the database
@@ -90,27 +115,13 @@ class Daemon:
         id_val = self.get_kvstore('offset_' + str(i))
         while(id_val != None):
             self.offsets.append(int(id_val))
+            print("offsets: {}".format(self.offsets))
             i += 1
             id_val = self.get_kvstore('offset_' + str(i))
         
         threading.Timer(60, self.syn_db_data).start()
         self.is_syncing = False
 
-
-    def send_transaction_and_print_status(self, transaction):
-        """
-        Sends a transaction to the Iroha network and prints its status.
-        """
-        hex_hash = binascii.hexlify(IrohaCrypto.hash(transaction))
-        logging.info('Transaction hash = %s, creator = %s', hex_hash,
-                     transaction.payload.reduced_payload.creator_account_id)
-        self.net.send_tx(transaction)
-        for status in self.net.tx_status_stream(transaction):
-            logging.info(status)
-            if (status[2] != 0):
-                logging.error('Transaction returned status %s', status[2])
-                return False
-        return True
 
     @trace
     def create_user(self, user_name) -> Keypair:
@@ -120,57 +131,46 @@ class Daemon:
         user_private_key = IrohaCrypto.private_key()
         user_public_key = IrohaCrypto.derive_public_key(user_private_key)
 
-        tx = self.iroha.transaction([
+        self.transactions.put(
             self.iroha.command('CreateAccount', account_name=user_name, domain_id=self.domain,
                                public_key=user_public_key)
-        ])
-        IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        if self.send_transaction_and_print_status(tx):
-            return Keypair(user_private_key, user_public_key)
-        return None
+        )
+        return Keypair(user_private_key, user_public_key)
 
     @trace
-    def create_asset(self, asset_name, precision) -> bool:
+    def create_asset(self, asset_name, precision):
         """
         Creates an asset.
         asset_name: name string
         precision: number of decimal places
         """
-        tx = self.iroha.transaction([
-            self.iroha.command('CreateAsset', asset_name=asset_name,
-                               domain_id=self.domain, precision=precision)
-        ])
-        IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        return self.send_transaction_and_print_status(tx)
+        self.transactions.put(self.iroha.command('CreateAsset', asset_name=asset_name,
+                               domain_id=self.domain, precision=precision))
 
     @trace
-    def add_asset(self, asset_id, amount) -> bool:
+    def add_asset(self, asset_id, amount):
         """
         Adds an asset to an account.
         asset_id: asset#domain
         amount: number of assets
         """
-        tx = self.iroha.transaction([
+        self.transactions.put(
             self.iroha.command('AddAssetQuantity',
                                asset_id=asset_id, amount=str(amount))
-        ])
-        IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        return self.send_transaction_and_print_status(tx)
+        )
 
     @trace
-    def transfer_asset(self, asset_id, amount, dest_account_id) -> bool:
+    def transfer_asset(self, asset_id, amount, dest_account_id):
         """
         Transfers an asset from an account to another.
         asset_id: asset#domain
         amount: number of assets
         dest_account_id: account@domain
         """
-        tx = self.iroha.transaction([
+        self.transactions.put(
             self.iroha.command('TransferAsset', src_account_id=self.account_id, dest_account_id=dest_account_id,
                                asset_id=asset_id, amount=str(amount))
-        ])
-        IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        return self.send_transaction_and_print_status(tx)
+        )
 
     @trace
     def set_kvstore(self, key, value, account_id=None) -> bool:
@@ -180,12 +180,10 @@ class Daemon:
         logging.info('Setting kvstore key %s to value %s', key, value)
         if account_id is None:
             account_id = self.account_id
-        tx = self.iroha.transaction([
-            self.iroha.command('SetAccountDetail',
-                               account_id=account_id, key=key, value=value)
-        ])
-        IrohaCrypto.sign_transaction(tx, self.keypair.private_key)
-        return self.send_transaction_and_print_status(tx)
+
+        self.transactions.put(self.iroha.command('SetAccountDetail',
+                               account_id=account_id, key=key, value=value))
+        return True
 
     def get_kvstore(self, key, account_id=None):
         """
@@ -309,7 +307,7 @@ class Daemon:
             for i in range(len(res)):
                 for j in range(i+1, len(res)):
                     distance = res[i].simhash.distance(res[j].simhash)
-                    if distance > 8:
+                    if distance < 3:
                         logging.debug('Duplicate entry found({}): {} and {}'.format(distance, res[i].name, res[j].name))
         threading.Timer(600, self.check_duplication).start()
 
