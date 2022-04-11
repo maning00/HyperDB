@@ -111,7 +111,7 @@ class Daemon:
                     res = cur.fetchone()
                     if res is not None:
                         self.skip_list.update(True, binascii.a2b_hex(res[0]))
-        i = 0
+        i = len(self.offsets)
         id_val = self.get_kvstore('offset_' + str(i))
         while(id_val != None):
             self.offsets.append(int(id_val))
@@ -242,10 +242,9 @@ class Daemon:
             offset = entry.offset
             # if offset is set, it means that it is a edit request
             if entry.offset == -1:
-                offset = self.set_id - 1
-
-            if offset >= len(self.offsets):
+                offset = len(self.offsets)
                 self.offsets.append(offset)
+
             self.offsets[offset] = self.set_id
 
             cur.execute("""
