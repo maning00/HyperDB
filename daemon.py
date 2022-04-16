@@ -70,7 +70,6 @@ class Daemon:
         """
         Sends transactions from the queue to the Iroha network.
         """
-        logging.info("Sending transactions...")
         txs = []
         while not self.transactions.empty():
             transaction = self.transactions.get()
@@ -79,6 +78,7 @@ class Daemon:
             txs.append(tx)
         
         if len(txs) != 0:
+            logging.info("Sending transactions...")
             self.net.send_txs(txs)
             logging.info("Transactions sent.")
             for tx in txs:
@@ -115,7 +115,7 @@ class Daemon:
         id_val = self.get_kvstore('offset_' + str(i))
         while(id_val != None):
             self.offsets.append(int(id_val))
-            print("offsets: {}".format(self.offsets))
+            logging.debug("offsets: {}".format(self.offsets))
             i += 1
             id_val = self.get_kvstore('offset_' + str(i))
         
@@ -227,11 +227,11 @@ class Daemon:
         logging.debug('Creating table %s', table_name)
         with self.db_conn.cursor() as cur:
             cur.execute("""
-            CREATE TABLE "{}" (id INT NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, timestamp INT NOT NULL,
+            CREATE TABLE "{}" (id INT NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, experiment_time INT NOT NULL,
             author VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL, 
             institution VARCHAR(255) NOT NULL, environment TEXT NOT NULL, 
             parameters TEXT NOT NULL, details TEXT NOT NULL, attachment TEXT NOT NULL,
-            hash TEXT NOT NULL, index_offset INT NOT NULL, creator VARCHAR NOT NULL, reserved TEXT NULL)
+            hash TEXT NOT NULL, index_offset INT NOT NULL, timestamp INT NOT NULL, creator VARCHAR NOT NULL)
             """.format(table_name))
             self.db_conn.commit()
 
@@ -247,11 +247,12 @@ class Daemon:
 
             self.offsets[offset] = self.set_id
 
+            print("inserting: {}".format(entry.__dict__))
             cur.execute("""
-            INSERT INTO "{}" VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
+            INSERT INTO "{}" VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """.format(self.account_id), (
-                self.set_id, entry.name, entry.timestamp, entry.author, entry.email, entry.institution, entry.environment,
-                entry.parameters, entry.details, entry.attachment, hash.hexdigest(), offset, self.account_id))
+                self.set_id, entry.name, entry.experiment_time, entry.author, entry.email, entry.institution, entry.environment,
+                entry.parameters, entry.details, entry.attachment, hash.hexdigest(), offset, entry.timestamp, self.account_id))
 
             if set_kvstore:
                 if self.set_kvstore('set_' + str(self.set_id), base64.b16encode(pickle.dumps(entry))) == False:
@@ -291,6 +292,25 @@ class Daemon:
                     res.append(line)
         return res
 
+    def get_history(self, table_name, id):
+        with self.db_conn.cursor() as cur:
+            op_str = 'SELECT * FROM "{}"'.format(
+                table_name)
+            cur.execute(op_str)
+            res = []
+            for row in cur.fetchall():
+                line = {}
+                en = Entry.from_tuple(row)
+                
+                if (self.offsets[en.offset] == int(id) and en.id != int(id)):
+                    line['data'] = en.__dict__
+                    # res.append(row.__dict__)
+                    logging.debug('verifying {}'.format(en.hash))
+                    response = self.skip_list.verify(binascii.a2b_hex(en.hash))
+                    line['authentication'] = response.__dict__
+                    res.append(line)
+        return res
+
     def check_duplication(self):
         with self.db_conn.cursor() as cur:
             op_str = 'SELECT * FROM "{}"'.format(
@@ -299,7 +319,7 @@ class Daemon:
             res = []
             for row in cur.fetchall():
                 en = Entry.from_tuple(row)
-                if (en.id == self.offsets[en.offset]):
+                if (en.offset < len(self.offsets) and en.id == self.offsets[en.offset]):
                     en.simhash = en.cal_simhash()
                     res.append(en)
             

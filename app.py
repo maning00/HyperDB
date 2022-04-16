@@ -56,6 +56,8 @@ def insert():
     j = data['data']
     while daemon.is_syncing:
         time.sleep(1)
+    j['timestamp'] = time.time()
+    logging.debug("insert API catched: {}".format(j))
     if daemon.insert_data(Entry(**j)) == True:
         return "OK", 201
     else:
@@ -67,6 +69,14 @@ def select_data():
     data = request.get_json()
     table = data['table_name']
     return json.dumps(daemon.get_data(table))
+
+
+@app.route("/api/v1/get_history", methods=['POST'])
+def get_history():
+    data = request.get_json()
+    table = data['table_name']
+    id = data['id']
+    return json.dumps(daemon.get_history(table, id))
 
 
 @app.route("/api/v1/select_columns", methods=['POST'])
