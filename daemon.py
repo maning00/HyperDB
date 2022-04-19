@@ -59,9 +59,9 @@ class Daemon:
         if self.account_id not in self.show_all_tables()['result']:
             self.create_table(self.account_id)
 
-        self.syn_db_data()
+        # self.syn_db_data()
         threading.Timer(5, self.send_transactions).start()
-        self.check_duplication()
+        # self.check_duplication()
         logging.info(
             "Account ID is {}\n Daemon is running...".format(self.account_id))
         
@@ -302,7 +302,7 @@ class Daemon:
                 line = {}
                 en = Entry.from_tuple(row)
                 
-                if (self.offsets[en.offset] == int(id) and en.id != int(id)):
+                if (self.offsets[en.offset] == id and en.id != id):
                     line['data'] = en.__dict__
                     # res.append(row.__dict__)
                     logging.debug('verifying {}'.format(en.hash))
