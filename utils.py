@@ -1,12 +1,69 @@
-from absl import logging
+from pydantic import BaseModel, BaseSettings
+from logging.config import dictConfig
+import logging
 import shutil
 from pathlib import Path
 import hashlib
 from fastapi import UploadFile
 from iroha import IrohaCrypto
 from simhash import Simhash
+from functools import lru_cache
 import jieba
 
+
+class Settings(BaseSettings):
+    iroha_address: str
+    account_id: str
+    nextcloud_url: str
+    nextcloud_username: str
+    nextcloud_password: str
+    private_key: str
+    public_key: str
+    class Config:
+        env_file = ".env"
+
+
+class LogConfig(BaseModel):
+    """Logging configuration to be set for the server"""
+
+    LOGGER_NAME: str = "HyperDB"
+    LOG_FORMAT: str = "%(levelprefix)s | %(asctime)s | %(message)s"
+    LOG_LEVEL: str = "DEBUG"
+
+    # Logging config
+    LOG_FORMAT: str = "%(levelprefix)s | %(asctime)s | %(message)s"
+    LOG_LEVEL: str = "DEBUG"
+
+    # Logging config
+    version = 1
+    disable_existing_loggers = False
+    formatters = {
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": LOG_FORMAT,
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    }
+    handlers = {
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+        },
+    }
+    loggers = {
+        "HyperDB": {"handlers": ["default"], "level": LOG_LEVEL},
+    }
+
+dictConfig(LogConfig().dict())
+logger = logging.getLogger("HyperDB")
+
+@lru_cache
+def get_settings():
+    """
+    Get the settings from the environment variables
+    """
+    return Settings()
 
 def save_upload_file(upload_file: UploadFile, destination: str) -> None:
     destination = Path(destination)

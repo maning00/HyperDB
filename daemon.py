@@ -20,14 +20,15 @@ class Daemon:
     chaindb daemon.
     """
 
-    def __init__(self, FLAGS, keypair):
-        self.iroha = Iroha(FLAGS.account_id)
-        self.net = IrohaGrpc('{}:{}'.format(
-            FLAGS.iroha_addr, FLAGS.iroha_port))
-        self.domain = FLAGS.account_id.split('@')[1]
+    def __init__(self, keypair):
+        setting = get_settings()
+        self.iroha = Iroha(setting.account_id)
+        self.net = IrohaGrpc('{}'.format(
+            setting.iroha_address))
+        self.domain = setting.account_id.split('@')[1]
         self.keypair = keypair
         self.skip_list = SkipList()
-        self.account_id = FLAGS.account_id
+        self.account_id = setting.account_id
         self.set_id = 1
         self.offsets = []
         self.is_syncing = False
@@ -59,9 +60,9 @@ class Daemon:
         if self.account_id not in self.show_all_tables()['result']:
             self.create_table(self.account_id)
 
-        # self.syn_db_data()
+        self.syn_db_data()
         threading.Timer(5, self.send_transactions).start()
-        # self.check_duplication()
+        self.check_duplication()
         logging.info(
             "Account ID is {}\n Daemon is running...".format(self.account_id))
         
