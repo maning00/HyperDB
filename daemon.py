@@ -10,36 +10,40 @@ from turtle import distance
 import psycopg
 from iroha import Iroha, IrohaGrpc
 from psycopg.rows import class_row
+import asyncio
 
 from skiplist import SkipList
 from utils import *
 
 
-class Daemon:
+class Daemon(object):
     """
     chaindb daemon.
     """
 
-    def __init__(self, FLAGS, keypair):
-        self.iroha = Iroha(FLAGS.account_id)
-        self.net = IrohaGrpc('{}:{}'.format(
-            FLAGS.iroha_addr, FLAGS.iroha_port))
-        self.domain = FLAGS.account_id.split('@')[1]
+    @classmethod
+    async def create(cls, keypair):
+        setting = get_settings()
+        self = Daemon()
+        self.iroha = Iroha(setting.account_id)
+        self.net = IrohaGrpc('{}'.format(
+            setting.iroha_address))
+        self.domain = setting.account_id.split('@')[1]
         self.keypair = keypair
         self.skip_list = SkipList()
-        self.account_id = FLAGS.account_id
+        self.account_id = setting.account_id
         self.set_id = 1
         self.offsets = []
         self.is_syncing = False
         self.transactions = Queue()
-
-        # connect to the database
-        logging.info('Connecting to PostgresSQL...')
+        
+                # connect to the database
+        logger.info('Connecting to PostgresSQL...')
         try:
-            self.db_conn = psycopg.connect(
+            self.db_conn = await psycopg.AsyncConnection.connect(
                 "host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
         except:
-            logging.warning("Cannot find database, tring to create one...")
+            logger.warning("Cannot find database, tring to create one...")
             con = psycopg.connect(
                 "host='172.29.101.25' user='iroha' password='iroha'")
             con._set_autocommit(True)
@@ -48,24 +52,28 @@ class Daemon:
             con.commit()
 
             try:
-                self.db_conn = psycopg.connect(
+                self.db_conn = psycopg.AsyncConnection.connect(
                     "host='172.29.101.25' dbname='chaindb' user='iroha' password='iroha'")
             except:
-                logging.error("Cannot connect to database")
+                logger.error("Cannot connect to database")
                 sys.exit(1)
             self.create_table(self.account_id)
 
-        logging.info('Connected to PostgresSQL.')
-        if self.account_id not in self.show_all_tables()['result']:
-            self.create_table(self.account_id)
+        logger.info('Connected to PostgresSQL.')
+        tables = await self.show_all_tables()
+        if self.account_id not in tables['result']:
+            await self.create_table(self.account_id)
 
-        # self.syn_db_data()
+        await self.syn_db_data()
         threading.Timer(5, self.send_transactions).start()
-        # self.check_duplication()
-        logging.info(
-            "Account ID is {}\n Daemon is running...".format(self.account_id))
-        
+        # await self.check_duplication()
+        logger.info(
+            "Account ID is {}\n Daemon is running...".format(self.account_id)) 
 
+        return self
+   
+        
+    @trace
     def send_transactions(self):
         """
         Sends transactions from the queue to the Iroha network.
@@ -78,26 +86,26 @@ class Daemon:
             txs.append(tx)
         
         if len(txs) != 0:
-            logging.info("Sending transactions...")
+            logger.info("Sending transactions...")
             self.net.send_txs(txs)
-            logging.info("Transactions sent.")
+            logger.info("Transactions sent.")
             for tx in txs:
                 for status in self.net.tx_status_stream(tx, 30):
-                    logging.info(status)
+                    logger.info(status)
                     if (status[2] != 0):
-                        logging.error('Transaction returned status %s', status[2])
+                        logger.error('Transaction returned status %s', status[2])
         threading.Timer(5, self.send_transactions).start()
 
-
-    def syn_db_data(self):
+    @trace
+    async def syn_db_data(self):
         # get most recent set_id from the database
         self.is_syncing = True
-        with self.db_conn.cursor() as cur:
-            cur.execute('SELECT MAX(id) FROM "{}"'.format(self.account_id))
-            res = cur.fetchone()
+        async with self.db_conn.cursor() as cur:
+            await cur.execute('SELECT MAX(id) FROM "{}"'.format(self.account_id))
+            res = await cur.fetchone()
             if res[0] is not None:
                 self.set_id = res[0] + 1
-                logging.info("Getting latest data...")
+                logger.info("Getting latest data...")
                 val = self.get_kvstore('set_' + str(self.set_id))
                 while(val):
                     entry = pickle.loads(base64.b16decode(val))
@@ -106,20 +114,20 @@ class Daemon:
                     val = self.get_kvstore('set_' + str(self.set_id))
 
                 for i in range(1, self.set_id):
-                    cur.execute('SELECT hash FROM "{}" WHERE id=%s'.format(
+                    await cur.execute('SELECT hash FROM "{}" WHERE id=%s'.format(
                         self.account_id), (str(i),))
-                    res = cur.fetchone()
+                    res = await cur.fetchone()
                     if res is not None:
                         self.skip_list.update(True, binascii.a2b_hex(res[0]))
         i = len(self.offsets)
         id_val = self.get_kvstore('offset_' + str(i))
         while(id_val != None):
             self.offsets.append(int(id_val))
-            logging.debug("offsets: {}".format(self.offsets))
+            logger.debug("offsets: {}".format(self.offsets))
             i += 1
             id_val = self.get_kvstore('offset_' + str(i))
         
-        threading.Timer(60, self.syn_db_data).start()
+        # threading.Timer(60, self.syn_db_data).start()
         self.is_syncing = False
 
 
@@ -177,7 +185,7 @@ class Daemon:
         """
         Sets a key-value pair in the kvstore.
         """
-        logging.info('Setting kvstore key %s to value %s', key, value)
+        logger.info('Setting kvstore key %s to value %s', key, value)
         if account_id is None:
             account_id = self.account_id
 
@@ -185,6 +193,7 @@ class Daemon:
                                account_id=account_id, key=key, value=value))
         return True
 
+    @trace
     def get_kvstore(self, key, account_id=None):
         """
         Gets a key-value pair from the kvstore.
@@ -197,10 +206,10 @@ class Daemon:
         response = self.net.send_query(query)
         data = json.loads(response.account_detail_response.detail)
         if len(data) == 0:
-            logging.debug('Key %s not found', key)
+            logger.debug('Key %s not found', key)
             return None
         else:
-            logging.debug('Key %s has value %s', key, data[account_id][key])
+            logger.debug('Key %s has value %s', key, data[account_id][key])
             return data[account_id][key]
 
     @trace
@@ -214,30 +223,34 @@ class Daemon:
         data = response.account_assets_response
         print(data)
 
-    def show_all_tables(self):
-        with self.db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")
+    @trace
+    async def show_all_tables(self):
+        async with self.db_conn.cursor() as cur:
+            await cur.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")
             res = {'result': []}
-            for row in cur.fetchall():
+            for row in await cur.fetchall():
                 res['result'].append(row[0])
             return res
 
-    def create_table(self, table_name):
-        logging.debug('Creating table %s', table_name)
-        with self.db_conn.cursor() as cur:
-            cur.execute("""
+    @trace
+    async def create_table(self, table_name):
+        logger.debug('Creating table %s', table_name)
+        async with self.db_conn.cursor() as cur:
+            await cur.execute("""
             CREATE TABLE "{}" (id INT NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, experiment_time INT NOT NULL,
             author VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL, 
             institution VARCHAR(255) NOT NULL, environment TEXT NOT NULL, 
             parameters TEXT NOT NULL, details TEXT NOT NULL, attachment TEXT NOT NULL,
             hash TEXT NOT NULL, index_offset INT NOT NULL, timestamp INT NOT NULL, creator VARCHAR NOT NULL)
             """.format(table_name))
-            self.db_conn.commit()
+            await self.db_conn.commit()
 
-    def insert_data(self, entry, set_kvstore=True):
-        while(self.is_syncing): time.sleep(1)
-        with self.db_conn.cursor() as cur:
+    @trace
+    async def insert_data(self, entry, set_kvstore=True):
+        while(self.is_syncing): await asyncio.sleep(0.1)
+        async with self.db_conn.cursor() as cur:
+            t1 = time.time()
             hash = entry.cal_hash()
             offset = entry.offset
             # if offset is set, it means that it is a edit request
@@ -246,52 +259,69 @@ class Daemon:
                 self.offsets.append(offset)
 
             self.offsets[offset] = self.set_id
+            t2 = time.time()
+            print("\033[31mpreprocess time: {}\033[0m".format(t2 - t1))
 
             print("inserting: {}".format(entry.__dict__))
-            cur.execute("""
+            await cur.execute("""
             INSERT INTO "{}" VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """.format(self.account_id), (
                 self.set_id, entry.name, entry.experiment_time, entry.author, entry.email, entry.institution, entry.environment,
                 entry.parameters, entry.details, entry.attachment, hash.hexdigest(), offset, entry.timestamp, self.account_id))
 
+            t3 = time.time()
+            print("\033[31minsert time: {}\033[0m".format(t3 - t2))
             if set_kvstore:
-                if self.set_kvstore('set_' + str(self.set_id), base64.b16encode(pickle.dumps(entry))) == False:
-                    logging.error('set_kvstore failed')
+                val = base64.b16encode(pickle.dumps(entry))
+                if self.set_kvstore('set_' + str(self.set_id), val) == False:
+                    logger.error('set_kvstore failed')
                     return False
 
                 if self.set_kvstore('offset_' + str(offset), str(self.set_id)) == False:
-                    logging.error('set_kvstore failed')
+                    logger.error('set_kvstore failed')
                     return False
+            
+            t4 = time.time()
+            print("\033[31mset kvstore time: {}\033[0m".format(t4 - t3))
 
             self.skip_list.update(True, hash.digest())
-            logging.debug('inserting {}'.format(hash.digest()))
+            logger.debug('inserting {}'.format(hash.digest()))
             self.set_id += 1
-            self.db_conn.commit()
+            await self.db_conn.commit()
+
+            t5 = time.time()
+            print("\033[31mcommit time: {}\033[0m".format(t5 - t4))
+            print("\033[31mall time: {}\033[0m".format(t5 - t1))
             return True
 
-    def get_data(self, table_name):
+    @trace
+    async def get_data(self, table_name):
         """
         Gets the data from the database.
         """
-        with self.db_conn.cursor() as cur:
-            op_str = 'SELECT * FROM "{}"'.format(
+        async with self.db_conn.cursor() as cur:
+
+            op_str = 'SELECT * FROM "{}" fetch first 10 rows only'.format(
                 table_name)
-            cur.execute(op_str)
+            await cur.execute(op_str)
             if table_name != self.account_id:
                 self.transfer_asset('coin#' + self.domain, 1, table_name)
             res = []
-            for row in cur.fetchall():
+            for row in await cur.fetchall():
                 line = {}
                 en = Entry.from_tuple(row)
+                
                 if (en.id == self.offsets[en.offset]): # always return the latest version of the entry
                     line['data'] = en.__dict__
                     # res.append(row.__dict__)
-                    logging.debug('verifying {}'.format(en.hash))
+                    logger.debug('verifying {}'.format(en.hash))
                     response = self.skip_list.verify(binascii.a2b_hex(en.hash))
                     line['authentication'] = response.__dict__
                     res.append(line)
         return res
 
+
+    @trace
     def get_history(self, table_name, id):
         with self.db_conn.cursor() as cur:
             op_str = 'SELECT * FROM "{}"'.format(
@@ -305,19 +335,21 @@ class Daemon:
                 if (self.offsets[en.offset] == id and en.id != id):
                     line['data'] = en.__dict__
                     # res.append(row.__dict__)
-                    logging.debug('verifying {}'.format(en.hash))
+                    logger.debug('verifying {}'.format(en.hash))
                     response = self.skip_list.verify(binascii.a2b_hex(en.hash))
                     line['authentication'] = response.__dict__
                     res.append(line)
         return res
 
-    def check_duplication(self):
-        with self.db_conn.cursor() as cur:
+
+    @trace
+    async def check_duplication(self):
+        async with self.db_conn.cursor() as cur:
             op_str = 'SELECT * FROM "{}"'.format(
                 self.account_id)
-            cur.execute(op_str)
+            await cur.execute(op_str)
             res = []
-            for row in cur.fetchall():
+            for row in await cur.fetchall():
                 en = Entry.from_tuple(row)
                 if (en.offset < len(self.offsets) and en.id == self.offsets[en.offset]):
                     en.simhash = en.cal_simhash()
@@ -327,9 +359,11 @@ class Daemon:
                 for j in range(i+1, len(res)):
                     distance = res[i].simhash.distance(res[j].simhash)
                     if distance < 3:
-                        logging.debug('Duplicate entry found({}): {} and {}'.format(distance, res[i].name, res[j].name))
+                        logger.debug('Duplicate entry found({}): {} and {}'.format(distance, res[i].name, res[j].name))
         threading.Timer(600, self.check_duplication).start()
 
+
+    @trace
     def select_columns(self, table_name, column_names):
         """
         Selects columns from the database.
