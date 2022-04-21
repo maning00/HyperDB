@@ -237,7 +237,7 @@ class Daemon:
             self.db_conn.commit()
 
     def insert_data(self, entry, set_kvstore=True):
-        while(self.is_syncing): time.sleep(1)
+        while(self.is_syncing): time.sleep(0.1)
         with self.db_conn.cursor() as cur:
             hash = entry.cal_hash()
             offset = entry.offset

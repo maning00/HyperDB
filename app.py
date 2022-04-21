@@ -21,7 +21,7 @@ upload_path = os.path.abspath(os.getcwd()) + "/uploads"
 if not os.path.exists(upload_path):
     os.mkdir(upload_path)
 
-pool = ThreadPoolExecutor(max_workers=10)
+pool = ThreadPoolExecutor(max_workers=32)
     
 keys = Keypair(setting.private_key, setting.public_key)
 daemon = None
@@ -46,14 +46,15 @@ async def create_table(table_name: str):
 async def insert(info: Request):
     j = await info.json()
     while daemon.is_syncing:
-        time.sleep(1)
+        time.sleep(0.1)
     j['timestamp'] = time.time()
-    future = pool.submit(daemon.insert_data, Entry(**j))
+    pool.submit(daemon.insert_data, Entry(**j))
     return {"Inserted": j['id']}
 
 
 @app.get("/api/v1/get_data/")
 async def select_data(table: str):
+    
     return daemon.get_data(table)
 
 
