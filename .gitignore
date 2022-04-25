@@ -185,3 +185,6 @@ typings/
 /backup
 /uploads
 .venv/
+
+/target
+/dbconnector/target

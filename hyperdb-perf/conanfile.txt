@@ -1,8 +1,0 @@
-[requires]
-cpr/1.8.1
-gflags/2.2.2
-glog/0.5.0
-tabulate/1.4
-
-[generators]
-cmake
